@@ -890,7 +890,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		if (elf_interpreter[elf_ppnt->p_filesz - 1] != '\0')
 			goto out_free_interp;
 
-		interpreter = open_exec(elf_interpreter);
+		interpreter = open_exec(elf_interpreter); // READダイナミックローダを読み込む
 		kfree(elf_interpreter);
 		retval = PTR_ERR(interpreter);
 		if (IS_ERR(interpreter))
