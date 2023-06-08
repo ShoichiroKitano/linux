@@ -882,12 +882,12 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			goto out_free_ph;
 
 		retval = elf_read(bprm->file, elf_interpreter, elf_ppnt->p_filesz,
-				  elf_ppnt->p_offset);
+				  elf_ppnt->p_offset); // elfのプログラムヘッダにはインタプリタ(ld-linux.so)が定義されるのでそれを読む
 		if (retval < 0)
 			goto out_free_interp;
 		/* make sure path is NULL terminated */
 		retval = -ENOEXEC;
-		if (elf_interpreter[elf_ppnt->p_filesz - 1] != '\0')
+		if (elf_interpreter[elf_ppnt->p_filesz - 1] != '\0') 
 			goto out_free_interp;
 
 		interpreter = open_exec(elf_interpreter); // READダイナミックローダを読み込む
