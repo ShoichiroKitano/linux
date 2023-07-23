@@ -93,7 +93,9 @@ static int elf_core_dump(struct coredump_params *cprm);
 #define ELF_CORE_EFLAGS	0
 #endif
 
-#define ELF_PAGESTART(_v) ((_v) & ~(int)(ELF_MIN_ALIGN-1))
+// _vが所属するページの先頭アドレスを算出
+#define ELF_PAGESTART(_v) ((_v) & ~(int)(ELF_MIN_ALIGN-1)) // <- _vが64bitの場合でも&は上位ビット32bit分を保存した状態で論理積を取る
+// _vが所属するページの先頭アドレスからの_vのオフセット(下位12bit)を算出
 #define ELF_PAGEOFFSET(_v) ((_v) & (ELF_MIN_ALIGN-1))
 #define ELF_PAGEALIGN(_v) (((_v) + ELF_MIN_ALIGN - 1) & ~(ELF_MIN_ALIGN - 1))
 
@@ -410,8 +412,8 @@ static unsigned long total_mapping_size(const struct elf_phdr *phdr, int nr)
 
 	for (i = 0; i < nr; i++) {
 		if (phdr[i].p_type == PT_LOAD) {
-			min_addr = min(min_addr, ELF_PAGESTART(phdr[i].p_vaddr));
-			max_addr = max(max_addr, phdr[i].p_vaddr + phdr[i].p_memsz);
+			min_addr = min(min_addr, ELF_PAGESTART(phdr[i].p_vaddr)); // -1とvaddrが配置されるページの先頭アドレスの小さい方
+			max_addr = max(max_addr, phdr[i].p_vaddr + phdr[i].p_memsz); // 0とp_memszをオフセットとしたvaddrからの位置
 			pt_load = true;
 		}
 	}
@@ -856,6 +858,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	if (!elf_phdata)
 		goto out;
 
+	// インタープリターだけ取得
 	elf_ppnt = elf_phdata;
 	for (i = 0; i < elf_ex->e_phnum; i++, elf_ppnt++) {
 		char *elf_interpreter;
@@ -1023,6 +1026,7 @@ out_free_interp:
 	start_data = 0;
 	end_data = 0;
 
+	// PT_LOAD(メモリにロードするセグメント）を取り出す
 	/* Now we do a little grungy work by mmapping the ELF image into
 	   the correct location in memory. */
 	for(i = 0, elf_ppnt = elf_phdata;
@@ -1062,6 +1066,7 @@ out_free_interp:
 			}
 		}
 
+		// セグメントに関するフラグ(読み取りとか書き込みとか)
 		elf_prot = make_prot(elf_ppnt->p_flags, &arch_state,
 				     !!interpreter, false);
 
@@ -1074,16 +1079,16 @@ out_free_interp:
 		 * we know we've already safely mapped the entire region with
 		 * MAP_FIXED_NOREPLACE in the once-per-binary logic following.
 		 */
-		if (!first_pt_load) {
+		if (!first_pt_load) { // 最初のプログラムヘッダーテーブルかどうか？(defaultが1なので偽になる)
 			elf_flags |= MAP_FIXED;
-		} else if (elf_ex->e_type == ET_EXEC) {
+		} else if (elf_ex->e_type == ET_EXEC) { // 読み込むのが実行可能形式の場合
 			/*
 			 * This logic is run once for the first LOAD Program
 			 * Header for ET_EXEC binaries. No special handling
 			 * is needed.
 			 */
 			elf_flags |= MAP_FIXED_NOREPLACE;
-		} else if (elf_ex->e_type == ET_DYN) {
+		} else if (elf_ex->e_type == ET_DYN) { // 読み込むのが共有ライブラリ？の場合
 			/*
 			 * This logic is run once for the first LOAD Program
 			 * Header for ET_DYN binaries to calculate the
@@ -1129,7 +1134,15 @@ out_free_interp:
 			 * ELF vaddrs will be correctly offset. The result
 			 * is then page aligned.
 			 */
-			load_bias = ELF_PAGESTART(load_bias - vaddr);
+			load_bias = ELF_PAGESTART(load_bias - vaddr); // ELF_PAGESTART(_v) ((_v) & ~(int)(ELF_MIN_ALIGN-1))
+																										// 初回は以下の式
+																										// 0 - vaddr = vaddr
+																										// vaddr & ~(int) (4096 - 1) <- 実際のページアドレスは0から4095になるので1引く
+																										// vaddr & ~(int) (4095) <- 4095を4byte表現である32bitにキャスト
+																										// vaddr & ~(0*20 1111 1111 1111) <- 4096は12bitで表現できる
+																										// vaddr & ~(1*20 0000 0000 0000) <- ページサイズのnotとの論理積を計算
+																										// 論理積では対象が64bit & 32bitの場合でも上位32bit分は保存される
+																										// ELF_PAGESTART <- vaddrがマッピングされるページの先頭アドレスがわかる
 
 			/*
 			 * Calculate the entire size of the ELF mapping
@@ -1150,15 +1163,16 @@ out_free_interp:
 			 *
 			 */
 			total_size = total_mapping_size(elf_phdata,
-							elf_ex->e_phnum);
+							elf_ex->e_phnum); // ロードされるメモリの最大値
 			if (!total_size) {
 				retval = -EINVAL;
 				goto out_free_dentry;
 			}
 		}
 
+		// elf_flags = MAP_FIXED_NOREPLACE
 		error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt,
-				elf_prot, elf_flags, total_size);
+				elf_prot, elf_flags, total_size); // おそらくここでメモリにマッピング
 		if (BAD_ADDR(error)) {
 			retval = IS_ERR_VALUE(error) ?
 				PTR_ERR((void*)error) : -EINVAL;
